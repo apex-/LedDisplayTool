@@ -95,7 +95,6 @@ rgb_t hsv_to_rgb(float h, float s, float v) {
 }
 
 
-
 int main(int argc, char ** argv) {
 
   int i= 0;
@@ -107,22 +106,57 @@ int main(int argc, char ** argv) {
 
   char cmd[256];
 
-  printf("Converted H:%f S:%f L:%f to RGB: %x\n", 0.5, 0.5, 0.5, hsv_to_rgb(180.0, 0.5, 0.5));
-  printf("Converted H:%f S:%f L:%f to RGB: %x\n", 0.5, 1.0, 0.9, hsv_to_rgb(300.0, 1.0, 1.0));
+  //printf("Converted H:%f S:%f L:%f to RGB: %x\n", 0.5, 0.5, 0.5, hsv_to_rgb(180.0, 0.5, 0.5));
+  //printf("Converted H:%f S:%f L:%f to RGB: %x\n", 0.5, 1.0, 0.9, hsv_to_rgb(300.0, 1.0, 1.0));
   
-  for (i=0; i<10; i++) {
-    printf("Time-step: %lu\n", get_time_step());
-    usleep(100000L);
-  }
+  //for (i=0; i<10; i++) {
+  //  printf("Time-step: %lu\n", get_time_step());
+  //  usleep(100000L);
+  //}
 
   if (fgets(cmd, sizeof(cmd),  stdin) != NULL) {
     printf("Command: %s", cmd);
   }
 
-  char * pch;
+  char *pch;
+  int ti = 0;
+  char *arg[5];
+  float h, s, l;
+  char *errCheck;
 
-  pch = strtok(cmd," \n");
-  while (pch != NULL) {
+    pch = strtok(cmd," ");
+    
+    while (pch != NULL) {
+    arg[ti] = pch;
+    ti++;
+    
+    printf("test\n");
+    printf("arg[ti]: %x  pch: %x\n", *arg[ti], pch);
+
+    //printf("arg[%d]: %s\n", ti, arg[ti]);
+    
+    if (strcmp("setpixel", pch) != 0) {
+        break;
+    } 
+    if(ti == 1) {
+       h = strtof(arg[1], &errCheck);
+       if (errCheck == arg[1]) {
+         printf("Conversion error %s\n", arg[1]);
+       }
+    }
+    if(ti == 2) {
+       h = strtof(arg[2], &errCheck);
+       if (errCheck == arg[2]) {
+         printf("Conversion error %s\n", arg[2]);
+       }
+    }
+    if(ti == 3) {
+       h = strtof(arg[2], &errCheck);
+       if (errCheck == arg[3]) {
+         printf("Conversion error %s\n", arg[3]);
+       }
+    }
+    printf("strcmp setpixel: %d\n", strcmp("setpixel", pch));
     printf("token '%s'\n", pch);
     pch = strtok(NULL," \n");
   }
