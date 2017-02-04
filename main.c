@@ -1,28 +1,59 @@
-#include <stdio.h>                                                                                            
-#include <string.h>                                                                                           
-#include <stdlib.h>                                                                                           
+#include <stdio.h> 
+#include <string.h> 
+#include <stdlib.h> 
 #include <math.h>
-#include <fcntl.h>                                                                                            
-#include <unistd.h>                                                                                           
-#include <assert.h>                                                                                           
-#include <stdint.h>                                                                                           
-#include <errno.h>                                                                                            
-#include <unistd.h>                                                                                           
-#include <sys/mman.h>                                                                                         
-#include <sys/ioctl.h>                                                                                        
-#include <sys/types.h>                                                                                        
-#include <sys/stat.h>    
+#include <fcntl.h>
+#include <unistd.h> 
+#include <assert.h> 
+#include <stdint.h> 
+#include <errno.h> 
+#include <unistd.h> 
+#include <sys/mman.h> 
+#include <sys/ioctl.h> 
+#include <sys/types.h> 
+#include <sys/stat.h> 
 #include <time.h>
 
-#define TESTDATA(x) 5*x
+#include "clk.h"
+#include "gpio.h"
+#include "dma.h"
+#include "pwm.h"
+
+#include "ws2811.h"
+
+#define TARGET_FREQ                              WS2811_TARGET_FREQ
+#define GPIO_PIN                                 18
+#define DMA                                      5
+#define STRIP_TYPE                               WS2811_STRIP_RGB  
+
+#define WIDTH                                    8
+#define HEIGHT                                   8
+#define LED_COUNT                                (WIDTH * HEIGHT)
 
 
-typedef struct {
-  uint32_t *prev;
-  uint32_t data; 
-  uint32_t *next;
-} node_t;
-
+ws2811_t ledstring =
+{
+    .freq = TARGET_FREQ,
+    .dmanum = DMA,
+    .channel =
+    {
+        [0] =
+        {
+            .gpionum = GPIO_PIN,
+            .count = LED_COUNT,
+            .invert = 0,
+            .brightness = 255,
+            .strip_type = STRIP_TYPE,
+        },
+        [1] =
+        {
+            .gpionum = 0,
+            .count = 0,
+            .invert = 0,
+            .brightness = 0,
+        },
+    },
+};
 
 
 /**
@@ -54,9 +85,6 @@ long get_time_step() {
 
   return tdiffsec * 1000000000L + tdiffnsec;
 }
-typedef uint32_t rgb_t;
-typedef uint32_t hsl_t;
-
 
 /** 
   * Given the values for hue (color), saturation and value
@@ -64,21 +92,32 @@ typedef uint32_t hsl_t;
   * @param h hue [0 - 360] 
   * @param s saturation [0 - 1]
   * @param v value [0 - 1]
-  * @return the RGB value encoded in an unsigned 32-bit integer: 0x00rrggbb
+  * @return the RGB value encoded in an unsigned 32-bit integer: 0x00RRGGBB
+  *         or -1 in case the supplied values were invalid.
   */
-rgb_t hsv_to_rgb(float h, float s, float v) {
+uint32_t hsv_to_rgb(float h, float s, float v) {
     
-    rgb_t rgb;
-    if (s == 0) { // special case: no saturation -> shade of gray
-        int i = v * 255;
-        rgb = (i << 16) | (i << 8) | i;
+    if (h < 0.0 || h > 360.0) {
+        return -1;	
     }
-    int hi = h / 60.0;
+    if (s < 0.0 || s > 1.0) {
+        return -1;
+    }
+    if (v < 0.0 || v > 1.0) {
+        return -1;
+    }
+
+    uint32_t rgb;
+    if (s == 0) { // no saturation: Return shade of gray
+        uint32_t i = v * 255;
+        return (i << 16) | (i << 8) | i;
+    }
+    uint32_t hi = h / 60.0;
     float f = h / 60.0 - hi;
-    int pi = v * (1.0 - s) * 255;
-    int qi = v * (1.0 - s * f) * 255;
-    int ti = v * (1.0 - s * (1.0 - f)) * 255;
-    int vi = v * 255;
+    uint32_t pi = v * (1.0 - s) * 255;
+    uint32_t qi = v * (1.0 - s * f) * 255;
+    uint32_t ti = v * (1.0 - s * (1.0 - f)) * 255;
+    uint32_t vi = v * 255;
 
     switch(hi) {
         case 0: 
@@ -89,27 +128,25 @@ rgb_t hsv_to_rgb(float h, float s, float v) {
         case 4: return (ti << 16 | pi << 8 | vi);
         case 5: return (vi << 16 | pi << 8 | qi);
         default:
-            error_at_line(-1, 0, __FILE__, __LINE__, "Unexpected error (hue value out of bounds?)"); 
-    }
-    return -1;
+            error_at_line(-1, 0, __FILE__, __LINE__, 
+                "Unexpected error: Please report this to the developers."); 
+	    return -1;
+	}
 }
 
 
 int main(int argc, char ** argv) {
 
-  int i= 0;
-  uint64_t b = 5;
-  uint32_t x = (uint32_t) ~0UL ^ 0xff00ff00;
- 
-  clockid_t clk_id;
-  struct timespec t;
-
   char cmd[256];
 
-  //for (i=0; i<10; i++) {
-  //  printf("Time-step: %lu\n", get_time_step());
-  //  usleep(100000L);
-  //}
+  int ret;
+
+  if ((ret = ws2811_init(&ledstring)) != WS2811_SUCCESS)
+    {
+        fprintf(stderr, "ws2811_init failed: %s\n", ws2811_get_return_t_str(ret));
+        return ret;
+    }
+
 
   if (fgets(cmd, sizeof(cmd),  stdin) != NULL) {
     //printf("Command: %s", cmd);
@@ -148,8 +185,7 @@ int main(int argc, char ** argv) {
     ti++;
   }
 
-  rgb_t rgbvalue = hsv_to_rgb(h, s, v);
-  printf("H:%f S:%f V:%f           RGB value: %x\n", h, s, v, rgbvalue);
-
+  uint32_t rgb = hsv_to_rgb(h, s, v);
+  printf("H:%f S:%f V:%f           RGB value: %x\n", h, s, v, rgb);
 }
 
