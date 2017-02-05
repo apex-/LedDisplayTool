@@ -8,6 +8,7 @@
 #include <stdint.h> 
 #include <errno.h> 
 #include <unistd.h> 
+#include <signal.h>
 #include <sys/mman.h> 
 #include <sys/ioctl.h> 
 #include <sys/types.h> 
@@ -30,6 +31,10 @@
 #define HEIGHT                                   8
 #define LED_COUNT                                (WIDTH * HEIGHT)
 
+static uint8_t running = 1;
+int width = WIDTH;
+int height = HEIGHT;
+int led_count = LED_COUNT;
 
 ws2811_t ledstring =
 {
@@ -54,6 +59,24 @@ ws2811_t ledstring =
         },
     },
 };
+
+
+static void ctrl_c_handler(int signum)
+{
+    running = 0;
+}
+
+
+static void setup_handlers(void)
+{
+    struct sigaction sa =
+    {
+        .sa_handler = ctrl_c_handler,
+    };
+
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+}
 
 
 /**
@@ -134,58 +157,119 @@ uint32_t hsv_to_rgb(float h, float s, float v) {
 	}
 }
 
+static float globhue = 0.0;
+
+void matrix_render(long tstep)
+{
+    int x, y;
+    float tstepsec = tstep*1E-9;
+    globhue += 10.0*tstepsec; 
+    if (globhue > 360.0) {
+        globhue -= 360.0;
+    }
+
+    for (x = 0; x < width; x++)
+    {
+        for (y = 0; y < height; y++)
+        {
+            uint32_t rgb = hsv_to_rgb(globhue, 1.0, 0.1);
+            ledstring.channel[0].leds[(y * width) + x] = rgb;
+        }
+    }
+}
+
+
+void matrix_clear(void)
+{
+    int x, y;
+
+    for (y = 0; y < (height ); y++)
+    {
+        for (x = 0; x < width; x++)
+        {
+            ledstring.channel[0].leds[(y * width) + x] = 0x00000000;
+        }
+    }
+}
+
 
 int main(int argc, char ** argv) {
 
-  char cmd[256];
+    char cmd[256];
+    int ret;
 
-  int ret;
+    setup_handlers();
 
-  if ((ret = ws2811_init(&ledstring)) != WS2811_SUCCESS)
+    if ((ret = ws2811_init(&ledstring)) != WS2811_SUCCESS)
     {
         fprintf(stderr, "ws2811_init failed: %s\n", ws2811_get_return_t_str(ret));
         return ret;
     }
 
+    while(running) {
 
-  if (fgets(cmd, sizeof(cmd),  stdin) != NULL) {
-    //printf("Command: %s", cmd);
-  }
+        long tstep = get_time_step();        
 
-  char *pch;
-  int ti = 0;
-  char *arg[5];
-  float h, s, v;
-  char *errCheck;
+        matrix_render(tstep);        
 
-    pch = strtok(cmd," \n");
+        if ((ret = ws2811_render(&ledstring)) != WS2811_SUCCESS)
+        {
+            fprintf(stderr, "ws2811_render failed: %s\n", ws2811_get_return_t_str(ret));
+            break;
+        }
+
+        /*
+        if (fgets(cmd, sizeof(cmd),  stdin) != NULL) {
+            //printf("Command: %s", cmd);
+        }   
+
+        char *pch;
+        int ti = 0;
+        char *arg[5];
+        float h, s, v;
+        char *errCheck;
+
+        pch = strtok(cmd," \n");
     
-    while (pch != NULL) {
-    arg[ti] = pch;
+        while (pch != NULL) {
+        arg[ti] = pch;
     
-    if(ti == 1) {
-       h = strtof(arg[1], &errCheck);
-       if (errCheck == arg[1]) {
-         printf("Conversion error 1 %s\n", arg[1]);
-       }
-    }
-    if(ti == 2) {
-       s = strtof(arg[2], &errCheck);
-       if (errCheck == arg[2]) {
-         printf("Conversion error 2 %s\n", arg[2]);
-       }
-    }
-    if(ti == 3) {
-       v = strtof(arg[3], &errCheck);
-       if (errCheck == arg[3]) {
-         printf("Conversion error 3 %s\n", arg[3]);
-       }
-    }
-    pch = strtok(NULL," \n");
-    ti++;
-  }
+        if(ti == 1) {
+            h = strtof(arg[1], &errCheck);
+            if (errCheck == arg[1]) {
+                printf("Conversion error 1 %s\n", arg[1]);
+            }
+        }
+        if(ti == 2) {
+            s = strtof(arg[2], &errCheck);
+            if (errCheck == arg[2]) {
+                printf("Conversion error 2 %s\n", arg[2]);
+            }
+        }
+        if(ti == 3) {
+            v = strtof(arg[3], &errCheck);
+            if (errCheck == arg[3]) {
+                printf("Conversion error 3 %s\n", arg[3]);
+            }
+        }
+        pch = strtok(NULL," \n");
+        ti++;
+        } 
 
-  uint32_t rgb = hsv_to_rgb(h, s, v);
-  printf("H:%f S:%f V:%f           RGB value: %x\n", h, s, v, rgb);
+        uint32_t rgb = hsv_to_rgb(h, s, v);
+        printf("H:%f S:%f V:%f           RGB value: %x\n", h, s, v, rgb);
+   
+        */
+        long tsleep = (1000000000L-tstep) / 30; 
+        
+        usleep(tsleep/1000);
+    }
+
+    matrix_clear();
+    //matrix_render();
+    ws2811_render(&ledstring);
+
+    ws2811_fini(&ledstring);
+
 }
 
